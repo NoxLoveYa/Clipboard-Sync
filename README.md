@@ -64,12 +64,19 @@ Output: `dist/ClipboardSync.exe` — self-contained, double-click to run.
 ├── clipboard_sync.py           Entry point
 ├── clipboard_sync/             Core package
 │   ├── __init__.py               Package exports
-│   ├── log.py                    Thread-safe logging queues
-│   ├── config.py                 Constants, config paths, mode persistence
-│   ├── network.py                ClientConnection + ServerHost classes
-│   ├── tray.py                   System-tray icon (TrayManager)
-│   ├── ui.py                     GUI widgets (AppUI)
-│   └── app.py                    Orchestrator (ClipboardSyncGUI)
+│   ├── app.py                    Orchestrator (ClipboardSyncGUI)
+│   ├── core/                     Foundational modules
+│   │   ├── log.py                  Thread-safe logging queues
+│   │   ├── config.py               Constants, paths, mode persistence
+│   │   └── watcher.py              Clipboard polling (ClipboardWatcher)
+│   ├── network/                 Networking
+│   │   ├── client.py               ClientConnection
+│   │   └── server.py               ServerHost
+│   └── ui/                      GUI
+│       ├── app_ui.py               AppUI (header, mode frame)
+│       ├── log_view.py             LogView (status dot + activity log)
+│       ├── panels.py               Client/server mode panel builders
+│       └── tray.py                 TrayManager (system tray icon)
 ├── settings.py                 Shared config helpers & settings dialog
 ├── build.py                    PyInstaller build script
 ├── requirements.txt            Python dependencies
