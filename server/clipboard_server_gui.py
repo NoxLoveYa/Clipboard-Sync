@@ -13,6 +13,13 @@ import queue
 import pyperclip
 import customtkinter as ctk
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
+
 PORT = 5556
 POLL_INTERVAL = 0.5
 MAX_LOG_LINES = 500
@@ -52,6 +59,10 @@ class ClipboardServerGUI:
         self._start_server()
         self._poll_log_queue()
         self._poll_status_queue()
+
+        self._tray_icon = None
+        if HAS_TRAY:
+            self._setup_tray()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -316,11 +327,72 @@ class ClipboardServerGUI:
                 log_event(f"Broadcasting clipboard ({len(current)} chars)", "info")
                 self._broadcast(current)
 
+    # ── system tray ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _create_tray_image():
+        """Build a 64x64 tray icon (blue circle with clipboard symbol)."""
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([2, 2, 62, 62], fill="#3a7ebf")
+        # Clipboard body
+        draw.rectangle([18, 16, 46, 54], fill=None, outline="white", width=4)
+        # Clipboard clip
+        draw.rectangle([26, 8, 38, 18], fill="white", outline="white", width=2)
+        # Horizontal lines
+        draw.line([(24, 28), (40, 28)], fill="white", width=3)
+        draw.line([(24, 36), (40, 36)], fill="white", width=3)
+        draw.line([(24, 44), (36, 44)], fill="white", width=3)
+        return img
+
+    def _setup_tray(self) -> None:
+        menu = pystray.Menu(
+            pystray.MenuItem("Show Window", self._on_tray_show, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit", self._on_tray_quit),
+        )
+        self._tray_icon = pystray.Icon(
+            "clipboard-sync-server",
+            self._create_tray_image(),
+            "Clipboard Sync — Server",
+            menu,
+        )
+        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        log_event("System tray icon active", "info")
+
+    def _on_tray_show(self) -> None:
+        """Called from pystray background thread — dispatch to main thread."""
+        self.root.after(0, self._show_window)
+
+    def _on_tray_quit(self) -> None:
+        """Called from pystray background thread — dispatch to main thread."""
+        self.root.after(0, self._quit_app)
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
     # ── shutdown ─────────────────────────────────────────────────────────────
 
     def _on_close(self) -> None:
+        """Window close button → minimize to tray (if available)."""
+        if self._tray_icon is not None:
+            log_event("Minimized to tray", "info")
+            self.root.withdraw()
+        else:
+            self._quit_app()
+
+    def _quit_app(self) -> None:
+        """Full application shutdown."""
         log_event("Shutting down server…", "warn")
         self.stop_event.set()
+
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
 
         if self.server_sock is not None:
             try:
