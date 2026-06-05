@@ -15,6 +15,8 @@ import queue
 import pyperclip
 import customtkinter as ctk
 
+from settings import load_config, save_config, open_settings_dialog
+
 try:
     import pystray
     from PIL import Image, ImageDraw
@@ -49,10 +51,15 @@ def _load_config() -> dict:
         return {"server_ip": "", "auto_reconnect": True}
 
 
-def _save_config(server_ip: str, auto_reconnect: bool) -> None:
+def _save_config(server_ip: str, auto_reconnect: bool, theme: str = "dark", close_action: str = "tray") -> None:
     try:
         with open(CONFIG_PATH, "w") as f:
-            json.dump({"server_ip": server_ip, "auto_reconnect": auto_reconnect}, f)
+            json.dump({
+                "server_ip": server_ip,
+                "auto_reconnect": auto_reconnect,
+                "theme": theme,
+                "close_action": close_action,
+            }, f, indent=2)
     except Exception:
         pass
 
@@ -63,6 +70,12 @@ class ClipboardClientGUI:
     """CustomTkinter GUI for the clipboard-sync client."""
 
     def __init__(self) -> None:
+        self._config = _load_config()
+        # fill missing keys
+        self._config.setdefault("close_action", "tray")
+        self._config.setdefault("theme", "dark")
+        ctk.set_appearance_mode(self._config.get("theme", "dark"))
+
         self.root = ctk.CTk()
         self.root.title("Clipboard Sync — Client")
         self.root.geometry("660x540")
@@ -75,14 +88,12 @@ class ClipboardClientGUI:
         self._connected = False
         self._last_sent = ""
 
-        config = _load_config()
-
-        self._build_ui(config)
+        self._build_ui(self._config)
         self._poll_log_queue()
         self._poll_status_queue()
 
         self._tray_icon = None
-        if HAS_TRAY:
+        if HAS_TRAY and self._config.get("close_action", "tray") == "tray":
             self._setup_tray()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -105,6 +116,13 @@ class ClipboardClientGUI:
             fg_color="#3a7ebf", corner_radius=4,
             text_color="white", padx=8,
         ).pack(side="left", padx=(0, 15), pady=12)
+
+        ctk.CTkButton(
+            header, text="⚙", width=32, height=28,
+            command=self._open_settings,
+            fg_color="transparent", hover_color="#3a3a3a",
+            font=("Segoe UI", 16),
+        ).pack(side="right", padx=(0, 12))
 
         # ── connect row ────────────────────────────────────────
         conn_frame = ctk.CTkFrame(self.root)
@@ -417,6 +435,40 @@ class ClipboardClientGUI:
                 )
                 self._send_text(current)
 
+    # ── settings ────────────────────────────────────────────────────────────
+
+    def _open_settings(self) -> None:
+        open_settings_dialog(self.root, self._config, self._apply_settings)
+
+    def _apply_settings(self, new_config: dict) -> None:
+        changed_theme = new_config.get("theme") != self._config.get("theme")
+        changed_close = new_config.get("close_action") != self._config.get("close_action")
+
+        self._config = new_config
+        _save_config(
+            self._config.get("server_ip", ""),
+            self._config.get("auto_reconnect", True),
+            self._config.get("theme", "dark"),
+            self._config.get("close_action", "tray"),
+        )
+
+        if changed_theme:
+            theme = self._config.get("theme", "dark")
+            ctk.set_appearance_mode(theme)
+            log_event(f"Theme changed to: {theme.title()}", "success")
+
+        if changed_close:
+            action = self._config.get("close_action", "tray")
+            if action == "tray" and self._tray_icon is None and HAS_TRAY:
+                self._setup_tray()
+                log_event("Close action: minimize to tray", "info")
+            elif action == "exit" and self._tray_icon is not None:
+                self._tray_icon.stop()
+                self._tray_icon = None
+                log_event("Close action: exit", "info")
+            else:
+                log_event(f"Close action: {action}", "info")
+
     # ── system tray ─────────────────────────────────────────────────────────
 
     @staticmethod
@@ -466,8 +518,8 @@ class ClipboardClientGUI:
     # ── shutdown ─────────────────────────────────────────────────────────────
 
     def _on_close(self) -> None:
-        """Window close button → minimize to tray (if available)."""
-        if self._tray_icon is not None:
+        """Window close button → minimize to tray or exit, per settings."""
+        if self._config.get("close_action") == "tray" and self._tray_icon is not None:
             log_event("Minimized to tray", "info")
             self.root.withdraw()
         else:
@@ -492,7 +544,12 @@ class ClipboardClientGUI:
                     pass
                 self._sock = None
 
-        _save_config(self._ip_var.get().strip(), self._auto_var.get())
+        _save_config(
+            self._ip_var.get().strip(),
+            self._auto_var.get(),
+            self._config.get("theme", "dark"),
+            self._config.get("close_action", "tray"),
+        )
         self.root.destroy()
 
     def run(self) -> None:
