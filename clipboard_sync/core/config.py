@@ -1,11 +1,13 @@
 """
-clipboard_sync.config  —  Constants, config paths, and mode persistence.
+clipboard_sync.config  —  Constants, config paths, mode persistence, and
+                          network utilities.
 
 No imports from other clipboard_sync modules (pure leaf).
 """
 
 import json
 import os
+import socket
 
 # ── network constants ───────────────────────────────────────────────────────
 
@@ -57,3 +59,19 @@ def config_defaults(mode: str) -> dict:
         "server_ip": "", "auto_reconnect": True,
         "close_action": "tray", "theme": "dark",
     }
+
+
+# ── network utility ─────────────────────────────────────────────────────────
+
+
+def get_local_ip() -> str:
+    """Discover the primary LAN IP by connecting to a public address."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"

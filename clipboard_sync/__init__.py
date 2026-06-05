@@ -7,7 +7,7 @@ Usage:
 """
 
 from clipboard_sync.app import ClipboardSyncGUI
-from clipboard_sync.config import load_mode
+from clipboard_sync.core.config import load_mode
 
 
 def main() -> None:

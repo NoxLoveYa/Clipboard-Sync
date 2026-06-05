@@ -14,7 +14,7 @@ try:
 except ImportError:
     HAS_TRAY = False
 
-from clipboard_sync.log import log_event
+from clipboard_sync.core.log import log_event
 
 
 def create_tray_image():
