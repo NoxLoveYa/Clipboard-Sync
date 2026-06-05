@@ -1,5 +1,5 @@
 """
-build.py  —  Build the Clipboard Sync GUIs into standalone .exe files.
+build.py  —  Build Clipboard Sync into a standalone .exe file.
 
 Usage:
     python build.py
@@ -8,8 +8,7 @@ Requires:  pip install pyinstaller
 
 Output (in the dist/ folder):
     dist/
-        ClipboardSync-Server.exe   (standalone server GUI)
-        ClipboardSync-Client.exe   (standalone client GUI)
+        ClipboardSync.exe   (unified client + server GUI)
 """
 
 import os
@@ -23,12 +22,8 @@ DIST = HERE / "dist"
 
 SCRIPTS = [
     {
-        "name": "ClipboardSync-Server",
-        "source": "server/clipboard_server_gui.py",
-    },
-    {
-        "name": "ClipboardSync-Client",
-        "source": "client/clipboard_client_gui.py",
+        "name": "ClipboardSync",
+        "source": "clipboard_sync.py",
     },
 ]
 

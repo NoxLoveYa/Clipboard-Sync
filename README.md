@@ -27,77 +27,51 @@ One machine runs as the **server**. Everyone else (including the server machine)
 pip install -r requirements.txt
 ```
 
-### 2. Start the server
-
-On the machine that will act as the relay:
+### 2. Launch the app
 
 ```bash
-cd server
-python clipboard_server_gui.py
+python clipboard_sync.py
 ```
 
-The server window shows its IP address — note this for the clients.
+The app starts in **Client** mode by default. Use the dropdown in the header bar to switch to **Server** mode.
 
-### 3. Start the client
+### 3. Start the server
 
-On every other machine (or the same machine in a second window):
+On the machine acting as the relay, switch the mode dropdown to **SERVER**. The window shows the server's IP — note this for clients. The server starts listening automatically.
 
-```bash
-cd client
-python clipboard_client_gui.py
-```
+### 4. Connect clients
 
-Enter the server's IP address and click **Connect**.
+On every other machine, enter the server's IP in **Client** mode and click **Connect**.
 
-### 4. Use it
+### 5. Use it
 
 Copy text on any machine — it appears on everyone else's clipboard within ~0.5 seconds.
 
-## Running Without the GUI (Headless / CLI)
-
-The original terminal-only scripts still work:
-
-```bash
-# On the server machine
-cd server
-python clipboard_server.py
-
-# On client machines — first edit SERVER_IP in clipboard_client.py
-cd client
-python clipboard_client.py
-```
-
-## Building Standalone `.exe` Files
-
-You can ship the apps as single `.exe` files — no Python installation needed.
+## Building a Standalone `.exe`
 
 ```bash
 pip install pyinstaller
 python build.py
 ```
 
-Output lands in `dist/`:
-
-```
-dist/
-    ClipboardSync-Server.exe   (12.6 MB)
-    ClipboardSync-Client.exe   (12.6 MB)
-```
-
-Each `.exe` is self-contained: double-click to run, uninstall by deleting the file.
+Output: `dist/ClipboardSync.exe` — self-contained, double-click to run.
 
 ## Project Structure
 
 ```
-├── build.py                 Build script (PyInstaller)
-├── requirements.txt         Python dependencies
-├── server/
-│   ├── clipboard_server.py       Original CLI server
-│   └── clipboard_server_gui.py   GUI server (CustomTkinter)
-├── client/
-│   ├── clipboard_client.py       Original CLI client
-│   └── clipboard_client_gui.py   GUI client (CustomTkinter)
-└── dist/                         Built .exe files (gitignored)
+├── clipboard_sync.py           Entry point
+├── clipboard_sync/             Core package
+│   ├── __init__.py               Package exports
+│   ├── log.py                    Thread-safe logging queues
+│   ├── config.py                 Constants, config paths, mode persistence
+│   ├── network.py                ClientConnection + ServerHost classes
+│   ├── tray.py                   System-tray icon (TrayManager)
+│   ├── ui.py                     GUI widgets (AppUI)
+│   └── app.py                    Orchestrator (ClipboardSyncGUI)
+├── settings.py                 Shared config helpers & settings dialog
+├── build.py                    PyInstaller build script
+├── requirements.txt            Python dependencies
+└── dist/                       Built .exe (gitignored)
 ```
 
 ## Technical Details
@@ -113,14 +87,14 @@ Each `.exe` is self-contained: double-click to run, uninstall by deleting the fi
 
 ### GUI Features
 
-- **Dark theme** — permanent, no toggle
+- **Mode switching** — toggle between Client and Server from the header dropdown at runtime
+- **Dark/Light/System theme** — configurable in Settings
 - **Status indicator** — coloured dot: green (connected), yellow (connecting), red (disconnected)
 - **Activity log** — colour-coded entries with timestamps, auto-scrolls
-- **Copy IP** button (server) — copies the server's LAN IP to clipboard
-- **Auto-reconnect** checkbox (client) — persists across sessions
-- **Cancel** button (client) — stop connecting or cancel a reconnect attempt
-- **Config save** — last-used IP and auto-reconnect preference saved to `~/.clipboardsync.json`
-- **Graceful shutdown** — closes sockets cleanly on window close
+- **Copy IP** button (server mode) — copies the server's LAN IP to clipboard
+- **Auto-reconnect** checkbox (client mode) — persists across sessions
+- **System tray** — minimize to tray or exit on close (configurable)
+- **Config save** — settings and last-used mode saved automatically
 
 ## Requirements
 
