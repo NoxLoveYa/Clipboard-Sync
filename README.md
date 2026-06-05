@@ -2,6 +2,8 @@
 
 Sync your clipboard across multiple Windows PCs over your local network. Copy on one machine, paste on any other — text only.
 
+![Preview](https://github.com/NoxLoveYa/Clipboard-Sync/blob/8f39c58eab442fc41e44078c821e5293bce9cfbc/image.png?raw=true)
+
 ## How It Works
 
 One machine runs as the **server**. Everyone else (including the server machine) runs the **client**. When any machine copies text, it's broadcast to all connected machines.
