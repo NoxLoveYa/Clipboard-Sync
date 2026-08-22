@@ -38,6 +38,11 @@ RECONNECT_DELAY_MAP: dict[str, int] = {
     "30 seconds": 30,
     "60 seconds": 60,
 }
+MAX_TRANSFER_MAP: dict[str, int] = {
+    "25 MB": 25,
+    "50 MB": 50,
+    "100 MB": 100,
+}
 
 
 # ── windows autostart (HKCU Run key) ─────────────────────────────────────────
@@ -136,7 +141,7 @@ def open_settings_dialog(
     show_reconnect : bool
         Show the client-only reconnect-delay row.
     """
-    WIN_W, WIN_H = 360, 300 + (52 if show_reconnect else 0)
+    WIN_W, WIN_H = 360, 440 + (52 if show_reconnect else 0)
 
     dialog = ctk.CTkToplevel(parent)
     dialog.title("Settings")
@@ -185,7 +190,27 @@ def open_settings_dialog(
         dialog, text="Start with Windows (minimized to tray)",
         variable=autostart_var, onvalue=True, offvalue=False,
         font=("Segoe UI", 12),
-    ).pack(anchor="w", padx=20, pady=(2, 18))
+    ).pack(anchor="w", padx=20, pady=(2, 4))
+
+    images_var = ctk.BooleanVar(
+        value=bool(current_config.get("sync_images", True)))
+    ctk.CTkCheckBox(
+        dialog, text="Sync images",
+        variable=images_var, onvalue=True, offvalue=False,
+        font=("Segoe UI", 12),
+    ).pack(anchor="w", padx=20, pady=(2, 4))
+
+    files_var = ctk.BooleanVar(
+        value=bool(current_config.get("sync_files", True)))
+    ctk.CTkCheckBox(
+        dialog, text="Sync files",
+        variable=files_var, onvalue=True, offvalue=False,
+        font=("Segoe UI", 12),
+    ).pack(anchor="w", padx=20, pady=(2, 10))
+
+    max_transfer_var = _option_row(
+        "Max transfer size:", MAX_TRANSFER_MAP,
+        "max_transfer_mb", top_pad=0, bottom_pad=18)
 
     # ── buttons ────────────────────────────────────────────────
     btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -202,6 +227,9 @@ def open_settings_dialog(
         new_config["close_action"] = CLOSE_ACTION_MAP[close_var.get()]
         new_config["theme"] = THEME_MAP[theme_var.get()]
         new_config["autostart"] = bool(autostart_var.get())
+        new_config["sync_images"] = bool(images_var.get())
+        new_config["sync_files"] = bool(files_var.get())
+        new_config["max_transfer_mb"] = MAX_TRANSFER_MAP[max_transfer_var.get()]
         if delay_var is not None:
             new_config["reconnect_delay"] = RECONNECT_DELAY_MAP[delay_var.get()]
         on_save(new_config)

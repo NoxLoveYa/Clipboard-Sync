@@ -21,6 +21,8 @@ from clipboard_sync.core.config import (
     load_mode, save_mode,
     config_path, config_defaults, get_local_ip,
 )
+from clipboard_sync.core import clipboard_io
+from clipboard_sync.network import protocol
 from clipboard_sync.network.client import ClientConnection
 from clipboard_sync.network.server import ServerHost
 from clipboard_sync.ui.tray import TrayManager
@@ -59,9 +61,11 @@ class ClipboardSyncGUI:
             "on_connected": self._on_client_connected,
             "on_disconnected": self._on_client_disconnected,
             "on_connecting": self._on_client_connecting,
+            "on_remote_applied": self._suppress_remote_echo,
         })
         self._server = ServerHost(callbacks={
             "on_client_count_changed": lambda c: None,
+            "on_remote_applied": self._suppress_remote_echo,
         })
 
         # ── UI ───────────────────────────────────────────────────
@@ -131,11 +135,44 @@ class ClipboardSyncGUI:
 
     # ── clipboard change handler ─────────────────────────────────────────
 
-    def _on_clipboard_change(self, text: str) -> None:
+    def _on_clipboard_change(self, snapshot) -> None:
+        kind = snapshot.kind
+        if kind == "image" and \
+                not self._config.get("sync_images", True):
+            return
+        if kind == "files" and not self._config.get("sync_files", True):
+            return
+
+        max_bytes = int(self._config.get("max_transfer_mb", 100)) * 1048576
+        if snapshot.total_bytes > max_bytes:
+            log_event(
+                f"{kind} too large "
+                f"({snapshot.total_bytes / 1048576:.1f} MB > "
+                f"max {max_bytes // 1048576} MB) — not sending",
+                "warn",
+            )
+            return
+
+        try:
+            frames, total = protocol.frames_for_snapshot(snapshot)
+        except OSError as e:
+            log_event(f"Cannot send {kind}: {e}", "error")
+            return
+
+        size = (f"{total} chars" if total < 1048576
+                else f"{total / 1048576:.1f} MB")
         if self._mode == "server":
-            self._server.broadcast(text)
+            self._server.broadcast_frames(frames)
+            log_event(f"Broadcasting {kind} ({size})", "info")
         else:
-            self._client.send_text(text)
+            if self._client.send_frames(frames):
+                log_event(f"Sent {kind} ({size})", "success")
+
+    def _suppress_remote_echo(self, fingerprint: str) -> None:
+        """Called from network threads after received content lands on the
+        local clipboard — stops the watcher echoing it back."""
+        if fingerprint:
+            self._watcher.suppress_next(fingerprint)
 
     # ── mode switching ────────────────────────────────────────────────────
 

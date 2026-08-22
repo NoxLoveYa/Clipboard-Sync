@@ -1,19 +1,20 @@
 """
 clipboard_sync.client_network  —  ClientConnection class.
 
-Manages a single client socket to a clipboard-sync server.
-Does not import tkinter; all UI updates happen via thread-safe
-queues (log.py) or plain callbacks provided by app.py.
+Manages a single client socket to a clipboard-sync server (protocol v2:
+length-prefixed binary frames).  Does not import tkinter; all UI updates
+happen via thread-safe queues (log.py) or plain callbacks provided by
+app.py.
 """
 
 import socket
 import threading
 import time
 
-import pyperclip
-
 from clipboard_sync.core.log import log_event, status_queue
-from clipboard_sync.core.config import PORT, RECONNECT_DELAY, FRAME_DELIMITER
+from clipboard_sync.core.config import PORT, RECONNECT_DELAY, RECEIVED_FILES_DIR
+from clipboard_sync.core.receiver import Inbox
+from clipboard_sync.network.protocol import iter_messages, ProtocolError
 
 
 class ClientConnection:
@@ -22,9 +23,9 @@ class ClientConnection:
     Parameters
     ----------
     callbacks : dict
-        ``on_connected``, ``on_disconnected``, ``on_connecting`` —
-        each called from a background thread (the caller should dispatch
-        to the main thread if needed via ``root.after(0, ...)``).
+        ``on_connected``, ``on_disconnected``, ``on_connecting`` and
+        ``on_remote_applied(fingerprint)`` — each called from a background
+        thread (the caller should dispatch to the main thread if needed).
     """
 
     def __init__(self, callbacks: dict) -> None:
@@ -33,7 +34,6 @@ class ClientConnection:
         self._sock_lock = threading.Lock()
         self._connected = False
         self._stop_event = threading.Event()
-        self._last_sent = ""
         self._reconnect_delay = RECONNECT_DELAY
 
     # -- public API -----------------------------------------------------------
@@ -41,14 +41,6 @@ class ClientConnection:
     @property
     def connected(self) -> bool:
         return self._connected
-
-    @property
-    def last_sent(self) -> str:
-        return self._last_sent
-
-    @last_sent.setter
-    def last_sent(self, value: str) -> None:
-        self._last_sent = value
 
     @property
     def reconnect_delay(self) -> int:
@@ -83,16 +75,17 @@ class ClientConnection:
         self._callbacks.get("on_disconnected", lambda: None)()
         status_queue.put(("#f44336", "Disconnected"))
 
-    def send_text(self, text: str) -> None:
-        """Send text to the server (no-op if not connected)."""
+    def send_frames(self, frames: list[bytes]) -> bool:
+        """Send pre-encoded frames to the server (no-op if not connected)."""
         with self._sock_lock:
             if self._sock is None:
-                return
+                return False
             try:
-                self._sock.sendall(
-                    (text + FRAME_DELIMITER).encode("utf-8"))
+                for frame in frames:
+                    self._sock.sendall(frame)
+                return True
             except Exception:
-                pass
+                return False
 
     def reset_stop_event(self) -> None:
         """Create a fresh stop_event (used after mode switch)."""
@@ -124,11 +117,6 @@ class ClientConnection:
                 log_event("Connected!", "success")
                 status_queue.put(("#4caf50", "Connected"))
                 self._callbacks.get("on_connected", lambda: None)()
-
-                try:
-                    self._last_sent = pyperclip.paste()
-                except Exception:
-                    self._last_sent = ""
 
                 self._receive_loop(conn)
 
@@ -192,28 +180,23 @@ class ClientConnection:
 
     def _receive_loop(self, conn: socket.socket) -> None:
         """Blocking receive loop.  Exits on disconnect / stop_event."""
-        buffer = ""
+        inbox = Inbox(RECEIVED_FILES_DIR)
         try:
-            while not self._stop_event.is_set():
+            for mtype, payload in iter_messages(conn, self._stop_event):
                 try:
-                    conn.settimeout(1.0)
-                    data = conn.recv(4096)
-                except socket.timeout:
+                    desc, fp = inbox.feed(mtype, payload)
+                except Exception as e:
+                    log_event(f"Failed to apply received data: {e}", "error")
                     continue
-                except OSError:
-                    break
-                if not data:
-                    break
-
-                buffer += data.decode("utf-8", errors="replace")
-                while FRAME_DELIMITER in buffer:
-                    msg, buffer = buffer.split(FRAME_DELIMITER, 1)
-                    if msg:
-                        log_event(
-                            f"Received from server ({len(msg)} chars)",
-                            "info",
-                        )
-                        pyperclip.copy(msg)
-                        self._last_sent = msg
+                if fp is not None:
+                    self._callbacks.get(
+                        "on_remote_applied", lambda f: None)(fp)
+                if desc:
+                    log_event(f"Received {desc}", "info")
+        except ProtocolError as e:
+            log_event(f"Incompatible peer — update both machines ({e})",
+                      "error")
         except Exception:
             pass
+        finally:
+            inbox.close()

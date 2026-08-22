@@ -1,6 +1,6 @@
 # Clipboard Sync
 
-Sync your clipboard across multiple Windows PCs over your local network. Copy on one machine, paste on any other — text only.
+Sync your clipboard across multiple Windows PCs over your local network. Copy on one machine, paste on any other — text, images, and files.
 
 ![Preview](https://github.com/NoxLoveYa/Clipboard-Sync/blob/8f39c58eab442fc41e44078c821e5293bce9cfbc/image.png?raw=true)
 
@@ -19,7 +19,7 @@ One machine runs as the **server**. Everyone else (including the server machine)
 
 - **Star topology** — all clients connect to the server; the server relays.
 - **No echo** — a client doesn't receive its own clipboard change back.
-- **Text only** — plain text. Images, files, and rich formatting are not supported.
+- **Text, images, and files** — screenshots sync as images; copied files are transferred and land in `Downloads\ClipboardSync\` on the receiving machine (max 100 MB per transfer, configurable).
 
 ## Quick Start
 
@@ -68,10 +68,13 @@ Output: `dist/ClipboardSync.exe` — self-contained, double-click to run.
 │   ├── core/                     Foundational modules
 │   │   ├── log.py                  Thread-safe logging queues
 │   │   ├── config.py               Constants, paths, mode persistence
+│   │   ├── clipboard_io.py         Clipboard read/write (text/image/files)
+│   │   ├── receiver.py             Assembles inbound transfers (Inbox)
 │   │   └── watcher.py              Clipboard polling (ClipboardWatcher)
 │   ├── network/                 Networking
-│   │   ├── client.py               ClientConnection
-│   │   └── server.py               ServerHost
+│   │   ├── protocol.py              Wire format v2 (frames, serialization)
+│   │   ├── client.py                ClientConnection
+│   │   └── server.py                ServerHost
 │   └── ui/                      GUI
 │       ├── app_ui.py               AppUI (header, mode frame)
 │       ├── log_view.py             LogView (status dot + activity log)
@@ -87,12 +90,14 @@ Output: `dist/ClipboardSync.exe` — self-contained, double-click to run.
 
 | Detail | Value |
 |---|---|
-| Protocol | Raw TCP, port `5556` |
-| Message framing | UTF-8 text + `\n---END---\n` delimiter |
+| Protocol | Raw TCP, port `5556`, length-prefixed binary frames (protocol v2) |
+| Message framing | `[4-byte length][1-byte type][payload]` — text / image / file manifest / file chunks |
 | Poll interval | 0.5 seconds |
 | GUI framework | CustomTkinter (dark theme) |
-| Clipboard access | pyperclip |
-| Auto-reconnect | Enabled by default (client), 5-second retry |
+| Clipboard access | pyperclip (text), pywin32 + Pillow (images & files) |
+| Auto-reconnect | Enabled by default (client), retry delay configurable in Settings |
+
+> **Compatibility:** protocol v2 is not compatible with older text-only builds — update all machines together.
 
 ### GUI Features
 
@@ -108,7 +113,7 @@ Output: `dist/ClipboardSync.exe` — self-contained, double-click to run.
 ## Requirements
 
 - **Python 3.8+**
-- **Windows, macOS, or Linux** — tested on Windows 11. CustomTkinter and pyperclip work on all three.
+- **Windows, macOS, or Linux** — tested on Windows 11. CustomTkinter and pyperclip work on all three. Image & file sync uses pywin32 (Windows); on other systems the app gracefully falls back to text-only.
 - **Local network** — all machines must be on the same LAN (or reachable via IP).
 
 ## License

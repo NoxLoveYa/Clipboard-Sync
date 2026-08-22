@@ -1,28 +1,30 @@
 """
 clipboard_sync.server_network  —  ServerHost class.
 
-Manages the server socket and all client connections.
-Does not import tkinter; all UI updates happen via thread-safe
-queues (log.py) or plain callbacks provided by app.py.
+Manages the server socket and all client connections (protocol v2:
+length-prefixed binary frames).  Relays frames verbatim between clients
+and applies them to the local clipboard.  Does not import tkinter; all UI
+updates happen via thread-safe queues (log.py) or plain callbacks
+provided by app.py.
 """
 
 import socket
 import threading
 
-import pyperclip
-
 from clipboard_sync.core.log import log_event, status_queue
-from clipboard_sync.core.config import PORT, FRAME_DELIMITER, get_local_ip
+from clipboard_sync.core.config import PORT, RECEIVED_FILES_DIR, get_local_ip
+from clipboard_sync.core.receiver import Inbox
+from clipboard_sync.network.protocol import iter_messages, encode, ProtocolError
 
 
 class ServerHost:
-    """Hosts a clipboard-sync server: accept clients, relay clipboard text.
+    """Hosts a clipboard-sync server: accept clients, relay clipboard data.
 
     Parameters
     ----------
     callbacks : dict
-        ``on_client_count_changed(count)`` — called when a client
-        connects or disconnects (from a background thread).
+        ``on_client_count_changed(count)`` and
+        ``on_remote_applied(fingerprint)`` — called from background threads.
     """
 
     def __init__(self, callbacks: dict) -> None:
@@ -31,17 +33,13 @@ class ServerHost:
         self.clients: dict[socket.socket, bool] = {}
         self.clients_lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._last_sent = ""
 
     # -- public API -----------------------------------------------------------
 
     @property
-    def last_sent(self) -> str:
-        return self._last_sent
-
-    @last_sent.setter
-    def last_sent(self, value: str) -> None:
-        self._last_sent = value
+    def connected_count(self) -> int:
+        with self.clients_lock:
+            return len(self.clients)
 
     def start(self) -> None:
         """Bind, listen, and start the accept-loop thread."""
@@ -81,18 +79,18 @@ class ServerHost:
                     pass
             self.clients.clear()
 
-    def broadcast(self, text: str,
-                  source_conn: socket.socket | None = None) -> None:
-        """Send *text* to all connected clients except *source_conn*."""
+    def broadcast_frames(self, frames: list[bytes],
+                         source_conn: socket.socket | None = None) -> None:
+        """Send raw frames to all connected clients except *source_conn*."""
         dead: list[socket.socket] = []
-        payload = (text + FRAME_DELIMITER).encode("utf-8")
 
         with self.clients_lock:
             for conn in list(self.clients):
                 if conn is source_conn:
                     continue
                 try:
-                    conn.sendall(payload)
+                    for frame in frames:
+                        conn.sendall(frame)
                 except Exception:
                     dead.append(conn)
             for conn in dead:
@@ -146,33 +144,29 @@ class ServerHost:
             ).start()
 
     def _handle_client(self, conn: socket.socket, addr: tuple) -> None:
-        buffer = ""
+        inbox = Inbox(RECEIVED_FILES_DIR)
         try:
-            while not self._stop_event.is_set():
+            for mtype, payload in iter_messages(conn, self._stop_event):
+                # relay verbatim to other clients before applying locally
+                self.broadcast_frames([encode(mtype, payload)],
+                                      source_conn=conn)
                 try:
-                    conn.settimeout(1.0)
-                    data = conn.recv(4096)
-                except socket.timeout:
+                    desc, fp = inbox.feed(mtype, payload)
+                except Exception as e:
+                    log_event(f"Failed to apply received data: {e}", "error")
                     continue
-                except OSError:
-                    break
-                if not data:
-                    break
-
-                buffer += data.decode("utf-8", errors="replace")
-                while FRAME_DELIMITER in buffer:
-                    msg, buffer = buffer.split(FRAME_DELIMITER, 1)
-                    if msg:
-                        log_event(
-                            f"Received from {addr[0]} ({len(msg)} chars)",
-                            "info",
-                        )
-                        pyperclip.copy(msg)
-                        self._last_sent = msg
-                        self.broadcast(msg, source_conn=conn)
+                if fp is not None:
+                    self._callbacks.get(
+                        "on_remote_applied", lambda f: None)(fp)
+                if desc:
+                    log_event(f"Received from {addr[0]}: {desc}", "info")
+        except ProtocolError as e:
+            log_event(f"Incompatible peer {addr[0]} — update both "
+                      f"machines ({e})", "error")
         except Exception:
             pass
         finally:
+            inbox.close()
             conn.close()
             n = self._unregister_client(conn)
             log_event(f"Client disconnected: {addr[0]}", "warn")

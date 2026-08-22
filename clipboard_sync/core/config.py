@@ -15,6 +15,11 @@ PORT = 5556
 POLL_INTERVAL = 0.5
 RECONNECT_DELAY = 5
 MAX_LOG_LINES = 500
+
+# binary sync (protocol v2)
+CHUNK_SIZE = 64 * 1024
+RECEIVED_FILES_DIR = os.path.join(
+    os.path.expanduser("~"), "Downloads", "ClipboardSync")
 FRAME_DELIMITER = "\n---END---\n"
 
 # ── config file paths ───────────────────────────────────────────────────────
@@ -55,13 +60,17 @@ def config_defaults(mode: str) -> dict:
     """Return the default config dict for the given mode."""
     if mode == "server":
         return {"close_action": "tray", "theme": "dark",
-                "autostart": False}
+                "autostart": False,
+                "sync_images": True, "sync_files": True,
+                "max_transfer_mb": 100}
     return {
         "server_ip": "", "auto_reconnect": True,
         "last_connected_ip": "",
         "reconnect_delay": 5,
         "close_action": "tray", "theme": "dark",
         "autostart": False,
+        "sync_images": True, "sync_files": True,
+        "max_transfer_mb": 100,
     }
 
 

@@ -1,27 +1,32 @@
 """
 clipboard_sync.watcher  —  Clipboard polling in a background thread.
 
-Calls ``on_change(text)`` when the clipboard content differs from
-the last observed value.  Safe to start/stop from the main thread.
+Polls all clipboard content kinds (text / image / files) via
+clipboard_io.read_snapshot() and fires ``on_change(snapshot)`` when the
+content fingerprint differs from the last observed value and is not the
+echo of something we just received.  Safe to start/stop from any thread.
 """
 
 import threading
 import time
 
-import pyperclip
-
-from clipboard_sync.core.log import log_event
+from clipboard_sync.core import clipboard_io
 from clipboard_sync.core.config import POLL_INTERVAL
+from clipboard_sync.core.log import log_event
+
+
+def _human(n: int) -> str:
+    return f"{n // 1024} chars" if n < 1048576 else f"{n / 1048576:.1f} MB"
 
 
 class ClipboardWatcher:
     """Polls the clipboard on a background thread and fires a callback
-    when the content changes.
+    when its content changes.
 
     Parameters
     ----------
     on_change : callable
-        Called with the new clipboard text (str) from the watcher thread.
+        Called with a ``clipboard_io.Snapshot`` from the watcher thread.
     get_mode_label : callable
         Called to get a log label like ``"server"`` or ``"client"``
         (used for log messages only).
@@ -32,10 +37,16 @@ class ClipboardWatcher:
         self._on_change = on_change
         self._get_mode_label = get_mode_label
         self._active = False
+        self._suppressed_fp: str | None = None
 
     @property
     def active(self) -> bool:
         return self._active
+
+    def suppress_next(self, fingerprint: str) -> None:
+        """Skip one watcher fire for *fingerprint* (echo guard). Called
+        after received content is placed on the local clipboard."""
+        self._suppressed_fp = fingerprint
 
     def start(self) -> None:
         """Begin watching the clipboard in a daemon thread."""
@@ -49,31 +60,37 @@ class ClipboardWatcher:
         self._active = False
 
     def _run(self) -> None:
-        last_sent = ""
-        try:
-            last_sent = pyperclip.paste()
-        except Exception:
-            pass
-
+        last_fp = self._baseline()
         while self._active:
             time.sleep(POLL_INTERVAL)
             if not self._active:
                 return
             try:
-                current = pyperclip.paste()
+                snap = clipboard_io.read_snapshot()
             except Exception:
                 continue
-            if current != last_sent and current.strip():
-                last_sent = current
-                label = self._get_mode_label()
-                if label == "server":
-                    log_event(
-                        f"Broadcasting clipboard ({len(current)} chars)",
-                        "info",
-                    )
-                else:
-                    log_event(
-                        f"Clipboard changed ({len(current)} chars) — sending",
-                        "success",
-                    )
-                self._on_change(current)
+            if snap is None:
+                continue
+            fp = clipboard_io.fingerprint(snap)
+            if fp == last_fp:
+                continue
+            last_fp = fp  # seen it either way — never re-fire for same fp
+            if fp == self._suppressed_fp:
+                self._suppressed_fp = None  # echo of received content
+                continue
+            log_event(
+                f"Clipboard changed: {snap.kind} "
+                f"({_human(snap.total_bytes)}) — sending",
+                "success",
+            )
+            self._on_change(snap)
+
+    def _baseline(self) -> str | None:
+        """Fingerprint the clipboard at startup so we don't fire on boot."""
+        try:
+            snap = clipboard_io.read_snapshot()
+        except Exception:
+            return None
+        if snap is None or (snap.kind == "text" and not snap.text.strip()):
+            return None
+        return clipboard_io.fingerprint(snap)
