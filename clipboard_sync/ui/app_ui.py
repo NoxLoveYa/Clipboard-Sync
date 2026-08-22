@@ -157,6 +157,11 @@ class AppUI:
         auto = self._auto_var.get() if self._auto_var else True
         return ip, auto
 
+    def set_ip(self, ip: str) -> None:
+        """Pre-fill the server IP entry (used by launch auto-connect)."""
+        if self._ip_var is not None:
+            self._ip_var.set(ip)
+
     # ── log / status delegation ────────────────────────────────────────────
 
     @property

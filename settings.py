@@ -6,8 +6,16 @@ Both server_gui and client_gui import from this module.
 
 import json
 import os
+import sys
 
 import customtkinter as ctk
+
+try:
+    import winreg
+    HAS_WINREG = True
+except ImportError:
+    winreg = None
+    HAS_WINREG = False
 
 # ── display → stored value mappings ──────────────────────────────────────────
 
@@ -20,6 +28,54 @@ THEME_MAP: dict[str, str] = {
     "Light": "light",
     "System": "system",
 }
+
+
+# ── windows autostart (HKCU Run key) ─────────────────────────────────────────
+
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_VALUE_NAME = "ClipboardSync"
+
+
+def _autostart_command() -> str:
+    """Build the command used for the autostart entry."""
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" --minimized'
+    python = sys.executable
+    pythonw = os.path.join(
+        os.path.dirname(python),
+        "pythonw.exe" if os.path.basename(python).lower() == "python.exe"
+        else os.path.basename(python),
+    )
+    script = os.path.abspath(sys.argv[0])
+    return f'"{pythonw}" "{script}" --minimized'
+
+
+def get_autostart() -> bool:
+    """Return True if the Run-key entry exists."""
+    if not HAS_WINREG:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, RUN_VALUE_NAME)
+            return True
+    except OSError:
+        return False
+
+
+def set_autostart(enabled: bool) -> None:
+    """Create or remove the HKCU Run-key entry (starts minimized to tray)."""
+    if not HAS_WINREG:
+        raise RuntimeError("Windows registry is not available")
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                        winreg.KEY_SET_VALUE) as key:
+        if enabled:
+            winreg.SetValueEx(key, RUN_VALUE_NAME, 0, winreg.REG_SZ,
+                              _autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(key, RUN_VALUE_NAME)
+            except FileNotFoundError:
+                pass
 
 
 # ── config helpers ───────────────────────────────────────────────────────────
@@ -67,7 +123,7 @@ def open_settings_dialog(
     on_save : callable
         Called with the updated config dict when the user clicks Save.
     """
-    WIN_W, WIN_H = 360, 250
+    WIN_W, WIN_H = 360, 300
 
     dialog = ctk.CTkToplevel(parent)
     dialog.title("Settings")
@@ -102,7 +158,15 @@ def open_settings_dialog(
     close_var = _option_row("When closing window:", CLOSE_ACTION_MAP,
                             "close_action", top_pad=18, bottom_pad=10)
     theme_var = _option_row("Theme:", THEME_MAP,
-                            "theme", top_pad=4, bottom_pad=18)
+                            "theme", top_pad=4, bottom_pad=10)
+
+    autostart_var = ctk.BooleanVar(
+        value=bool(current_config.get("autostart", False)))
+    ctk.CTkCheckBox(
+        dialog, text="Start with Windows (minimized to tray)",
+        variable=autostart_var, onvalue=True, offvalue=False,
+        font=("Segoe UI", 12),
+    ).pack(anchor="w", padx=20, pady=(2, 18))
 
     # ── buttons ────────────────────────────────────────────────
     btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -118,6 +182,7 @@ def open_settings_dialog(
         new_config = dict(current_config)
         new_config["close_action"] = CLOSE_ACTION_MAP[close_var.get()]
         new_config["theme"] = THEME_MAP[theme_var.get()]
+        new_config["autostart"] = bool(autostart_var.get())
         on_save(new_config)
         dialog.destroy()
 

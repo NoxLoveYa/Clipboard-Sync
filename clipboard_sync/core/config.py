@@ -54,10 +54,13 @@ def config_path(mode: str) -> str:
 def config_defaults(mode: str) -> dict:
     """Return the default config dict for the given mode."""
     if mode == "server":
-        return {"close_action": "tray", "theme": "dark"}
+        return {"close_action": "tray", "theme": "dark",
+                "autostart": False}
     return {
         "server_ip": "", "auto_reconnect": True,
+        "last_connected_ip": "",
         "close_action": "tray", "theme": "dark",
+        "autostart": False,
     }
 
 

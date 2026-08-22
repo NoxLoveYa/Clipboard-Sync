@@ -6,10 +6,15 @@ and ClipboardWatcher.  Handles mode switching, lifecycle, settings,
 and shutdown.
 """
 
+import sys
+
 import pyperclip
 import customtkinter as ctk
 
-from settings import load_config, save_config, open_settings_dialog
+from settings import (
+    load_config, save_config, open_settings_dialog,
+    set_autostart, get_autostart,
+)
 
 from clipboard_sync.core.log import log_event
 from clipboard_sync.core.config import (
@@ -26,6 +31,8 @@ from clipboard_sync.core.watcher import ClipboardWatcher
 class ClipboardSyncGUI:
     """Single GUI class handling both client and server modes."""
 
+    START_MINIMIZED = "--minimized" in sys.argv
+
     def __init__(self) -> None:
         # ── mode & config ────────────────────────────────────────
         self._mode: str = load_mode()
@@ -38,6 +45,8 @@ class ClipboardSyncGUI:
         self.root = ctk.CTk()
         self.root.geometry("660x540")
         self.root.minsize(520, 400)
+        if self.START_MINIMIZED:
+            self.root.withdraw()
 
         # ── watcher ──────────────────────────────────────────────
         self._watcher = ClipboardWatcher(
@@ -71,8 +80,13 @@ class ClipboardSyncGUI:
             on_show=lambda: self.root.after(0, self._show_window),
             on_quit=lambda: self.root.after(0, self._quit_app),
         )
-        if self._config.get("close_action", "tray") == "tray":
+        if (self._config.get("close_action", "tray") == "tray"
+                or self.START_MINIMIZED):
             self._tray.setup(self._mode)
+
+        # ── sync autostart with config ───────────────────────────
+        if bool(self._config.get("autostart", False)) != get_autostart():
+            self._apply_autostart()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -95,6 +109,18 @@ class ClipboardSyncGUI:
         if self._mode == "server":
             self._server.start()
             self._watcher.start()
+            return
+
+        # client mode — auto-connect to last known good IP
+        ip = ((self._config.get("last_connected_ip")
+               or self._config.get("server_ip") or "").strip())
+        if not ip:
+            log_event(
+                "No saved server IP — enter one and click Connect", "warn")
+            return
+        self._ui.set_ip(ip)
+        log_event(f"Auto-connecting to last server {ip}…", "info")
+        self._start_client()
 
     def _stop_services(self) -> None:
         self._watcher.stop()
@@ -146,7 +172,13 @@ class ClipboardSyncGUI:
     # ── client callbacks (main-thread dispatch) ───────────────────────────
 
     def _on_client_connected(self) -> None:
-        self.root.after(0, lambda: self._ui.set_button_state("connected"))
+        def _update() -> None:
+            self._ui.set_button_state("connected")
+            ip, _ = self._ui.get_connection_inputs()
+            if ip and ip != self._config.get("last_connected_ip"):
+                self._config["last_connected_ip"] = ip
+                save_config(config_path(self._mode), self._config)
+        self.root.after(0, _update)
 
     def _on_client_disconnected(self) -> None:
         self.root.after(0, lambda: self._ui.set_button_state("idle"))
@@ -194,6 +226,10 @@ class ClipboardSyncGUI:
             new_config.get("close_action") !=
             self._config.get("close_action")
         )
+        changed_autostart = (
+            bool(new_config.get("autostart", False)) !=
+            bool(self._config.get("autostart", False))
+        )
 
         self._config = new_config
         self._save_current_config()
@@ -213,6 +249,21 @@ class ClipboardSyncGUI:
                 log_event("Close action: exit", "info")
             else:
                 log_event(f"Close action: {action}", "info")
+
+        if changed_autostart:
+            self._apply_autostart()
+
+    # ── windows autostart ────────────────────────────────────────────────
+
+    def _apply_autostart(self) -> None:
+        enabled = bool(self._config.get("autostart", False))
+        try:
+            set_autostart(enabled)
+            state = "enabled — will start minimized to tray" if enabled \
+                else "disabled"
+            log_event(f"Start with Windows {state}", "info")
+        except Exception as e:
+            log_event(f"Failed to update startup entry: {e}", "error")
 
     # ── window & tray ─────────────────────────────────────────────────────
 
