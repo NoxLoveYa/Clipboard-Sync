@@ -184,6 +184,7 @@ class ClientConnection:
 
     def _receive_loop(self, conn: socket.socket) -> None:
         """Blocking receive loop.  Exits on disconnect / stop_event."""
+        stop = self._stop_event
         inbox = Inbox(RECEIVED_FILES_DIR)
         try:
             for mtype, payload in iter_messages(conn, stop):

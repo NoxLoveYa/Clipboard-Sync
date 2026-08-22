@@ -14,6 +14,7 @@ import threading
 from clipboard_sync.core.log import log_event, status_queue
 from clipboard_sync.core.config import PORT, RECEIVED_FILES_DIR, get_local_ip
 from clipboard_sync.core.receiver import Inbox
+from clipboard_sync.network.discovery import DiscoveryBroadcaster
 from clipboard_sync.network.protocol import iter_messages, encode, ProtocolError
 
 
@@ -33,6 +34,7 @@ class ServerHost:
         self.clients: dict[socket.socket, bool] = {}
         self.clients_lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._broadcaster: DiscoveryBroadcaster | None = None
 
     # -- public API -----------------------------------------------------------
 
@@ -60,11 +62,17 @@ class ServerHost:
         log_event(f"Server started on {local_ip}:{PORT}", "success")
         status_queue.put(("#ff9800", f"Listening on {local_ip}:{PORT}"))
 
+        self._broadcaster = DiscoveryBroadcaster()
+        self._broadcaster.start()
+
         threading.Thread(target=self._accept_loop, daemon=True).start()
 
     def stop(self) -> None:
         """Close server socket and all client connections."""
         self._stop_event.set()
+        if self._broadcaster is not None:
+            self._broadcaster.stop()
+            self._broadcaster = None
         if self.server_sock is not None:
             try:
                 self.server_sock.close()

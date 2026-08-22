@@ -141,7 +141,7 @@ def open_settings_dialog(
     show_reconnect : bool
         Show the client-only reconnect-delay row.
     """
-    WIN_W, WIN_H = 360, 440 + (52 if show_reconnect else 0)
+    WIN_W, WIN_H = 360, 470 + (82 if show_reconnect else 0)
 
     dialog = ctk.CTkToplevel(parent)
     dialog.title("Settings")
@@ -179,10 +179,18 @@ def open_settings_dialog(
                             "theme", top_pad=4, bottom_pad=10)
 
     delay_var: ctk.StringVar | None = None
+    discover_var: ctk.BooleanVar | None = None
     if show_reconnect:
         delay_var = _option_row(
             "Reconnect delay (unlimited retries):", RECONNECT_DELAY_MAP,
             "reconnect_delay", top_pad=4, bottom_pad=10)
+        discover_var = ctk.BooleanVar(
+            value=bool(current_config.get("auto_discover", True)))
+        ctk.CTkCheckBox(
+            dialog, text="Auto-discover servers on LAN",
+            variable=discover_var, onvalue=True, offvalue=False,
+            font=("Segoe UI", 12),
+        ).pack(anchor="w", padx=20, pady=(0, 10))
 
     autostart_var = ctk.BooleanVar(
         value=bool(current_config.get("autostart", False)))
@@ -232,6 +240,7 @@ def open_settings_dialog(
         new_config["max_transfer_mb"] = MAX_TRANSFER_MAP[max_transfer_var.get()]
         if delay_var is not None:
             new_config["reconnect_delay"] = RECONNECT_DELAY_MAP[delay_var.get()]
+            new_config["auto_discover"] = bool(discover_var.get())
         on_save(new_config)
         dialog.destroy()
 

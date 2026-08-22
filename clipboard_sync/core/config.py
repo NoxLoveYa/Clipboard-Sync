@@ -20,6 +20,11 @@ MAX_LOG_LINES = 500
 CHUNK_SIZE = 64 * 1024
 RECEIVED_FILES_DIR = os.path.join(
     os.path.expanduser("~"), "Downloads", "ClipboardSync")
+
+# zero-setup LAN discovery (UDP beacons)
+DISCOVERY_PORT = 5557
+BEACON_INTERVAL = 3
+BEACON_MAGIC = "CLIPSYNC_V1"
 FRAME_DELIMITER = "\n---END---\n"
 
 # ── config file paths ───────────────────────────────────────────────────────
@@ -27,6 +32,7 @@ FRAME_DELIMITER = "\n---END---\n"
 CLIENT_CONFIG_PATH = os.path.expanduser("~/.clipboardsync.json")
 SERVER_CONFIG_PATH = os.path.expanduser("~/.clipboardsync-server.json")
 MODE_DIR = os.path.expanduser("~/.clipboard-sync")
+INSTANCE_FILE = os.path.join(MODE_DIR, "instance.json")
 MODE_FILE = os.path.join(MODE_DIR, "mode.json")
 
 # ── mode persistence ────────────────────────────────────────────────────────
@@ -66,7 +72,7 @@ def config_defaults(mode: str) -> dict:
     return {
         "server_ip": "", "auto_reconnect": True,
         "last_connected_ip": "",
-        "reconnect_delay": 5,
+        "reconnect_delay": 5, "auto_discover": True,
         "close_action": "tray", "theme": "dark",
         "autostart": False,
         "sync_images": True, "sync_files": True,

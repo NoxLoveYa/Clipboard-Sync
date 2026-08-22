@@ -6,6 +6,7 @@ and ClipboardWatcher.  Handles mode switching, lifecycle, settings,
 and shutdown.
 """
 
+import queue
 import sys
 
 import pyperclip
@@ -16,13 +17,14 @@ from settings import (
     set_autostart, get_autostart,
 )
 
-from clipboard_sync.core.log import log_event
+from clipboard_sync.core.log import log_event, status_queue
 from clipboard_sync.core.config import (
     load_mode, save_mode,
     config_path, config_defaults, get_local_ip,
 )
 from clipboard_sync.core import clipboard_io
 from clipboard_sync.network import protocol
+from clipboard_sync.network.discovery import DiscoveryListener, found_queue
 from clipboard_sync.network.client import ClientConnection
 from clipboard_sync.network.server import ServerHost
 from clipboard_sync.ui.tray import TrayManager
@@ -36,6 +38,7 @@ class ClipboardSyncGUI:
     START_MINIMIZED = "--minimized" in sys.argv
 
     def __init__(self) -> None:
+        self._discovery: DiscoveryListener | None = None
         # ── mode & config ────────────────────────────────────────
         self._mode: str = load_mode()
         self._config = load_config(
@@ -118,16 +121,68 @@ class ClipboardSyncGUI:
         # client mode — auto-connect to last known good IP
         ip = ((self._config.get("last_connected_ip")
                or self._config.get("server_ip") or "").strip())
-        if not ip:
+        if ip:
+            self._ui.set_ip(ip)
+            log_event(f"Auto-connecting to last server {ip}…", "info")
+            self._start_client()
+            return
+
+        # no known server — zero-setup LAN discovery
+        if self._config.get("auto_discover", True):
+            self._start_discovery()
+        else:
             log_event(
                 "No saved server IP — enter one and click Connect", "warn")
+
+    # ── zero-setup LAN discovery ─────────────────────────────────────────
+
+    def _start_discovery(self) -> None:
+        if self._discovery is not None:
             return
-        self._ui.set_ip(ip)
-        log_event(f"Auto-connecting to last server {ip}…", "info")
-        self._start_client()
+        log_event("Searching for servers on LAN…", "info")
+        status_queue.put(("#ff9800", "Searching for servers…"))
+        self._discovery = DiscoveryListener(
+            on_found=lambda hostname, ip, port: found_queue.put((ip,)))
+        self._discovery.start()
+        self.root.after(300, self._drain_discovery)
+        self.root.after(15000, self._discovery_timeout)
+
+    def _stop_discovery(self) -> None:
+        if self._discovery is not None:
+            self._discovery.stop()
+            self._discovery = None
+
+    def _drain_discovery(self) -> None:
+        """Main-thread poller: connect to the first discovered server."""
+        try:
+            (ip,) = found_queue.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._stop_discovery()  # first server wins
+            if (self._mode == "client"
+                    and not self._client.connected
+                    and ip != get_local_ip()):
+                log_event(f"Auto-connecting to discovered server {ip}…",
+                          "info")
+                self._config["server_ip"] = ip
+                save_config(config_path(self._mode), self._config)
+                self._ui.set_ip(ip)
+                self._start_client()
+            return
+        if self._discovery is not None:
+            self.root.after(300, self._drain_discovery)
+
+    def _discovery_timeout(self) -> None:
+        if (self._mode == "client" and self._discovery is not None
+                and not self._client.connected):
+            log_event("No servers found in 15 s — is the server running, "
+                      "and did you allow the app through Windows Firewall?",
+                      "warn")
 
     def _stop_services(self) -> None:
         self._watcher.stop()
+        self._stop_discovery()
         if self._mode == "server":
             self._server.stop()
         else:
@@ -226,6 +281,7 @@ class ClipboardSyncGUI:
     # ── client / server actions ───────────────────────────────────────────
 
     def _start_client(self) -> None:
+        self._stop_discovery()  # manual connect wins over discovery
         ip, auto_reconnect = self._ui.get_connection_inputs()
         if not ip:
             log_event("Please enter a server IP address", "warn")
