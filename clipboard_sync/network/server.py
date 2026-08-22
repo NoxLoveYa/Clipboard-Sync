@@ -120,8 +120,10 @@ class ServerHost:
 
     def _accept_loop(self) -> None:
         assert self.server_sock is not None
+        # capture THIS generation's stop event (reset_stop_event swaps it)
+        stop = self._stop_event
 
-        while not self._stop_event.is_set():
+        while not stop.is_set():
             try:
                 self.server_sock.settimeout(1.0)
                 conn, addr = self.server_sock.accept()
@@ -144,9 +146,10 @@ class ServerHost:
             ).start()
 
     def _handle_client(self, conn: socket.socket, addr: tuple) -> None:
+        stop = self._stop_event  # capture this generation's stop event
         inbox = Inbox(RECEIVED_FILES_DIR)
         try:
-            for mtype, payload in iter_messages(conn, self._stop_event):
+            for mtype, payload in iter_messages(conn, stop):
                 # relay verbatim to other clients before applying locally
                 self.broadcast_frames([encode(mtype, payload)],
                                       source_conn=conn)

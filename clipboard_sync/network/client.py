@@ -103,7 +103,11 @@ class ClientConnection:
                 self._sock = None
 
     def _connect_loop(self, server_ip: str, auto_reconnect: bool) -> None:
-        while not self._stop_event.is_set():
+        # capture THIS generation's stop event — reset_stop_event() swaps in
+        # a fresh Event on mode switch, and reading self._stop_event
+        # dynamically would make an old retry loop see "not stopping" forever.
+        stop = self._stop_event
+        while not stop.is_set():
             conn: socket.socket | None = None
             try:
                 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -120,7 +124,7 @@ class ClientConnection:
 
                 self._receive_loop(conn)
 
-                if self._stop_event.is_set():
+                if stop.is_set():
                     break
 
                 log_event("Connection lost", "error")
@@ -128,20 +132,20 @@ class ClientConnection:
                 self._callbacks.get("on_disconnected", lambda: None)()
 
             except ConnectionRefusedError:
-                if self._stop_event.is_set():
+                if stop.is_set():
                     break
                 log_event("Connection refused — is the server running?",
                           "error")
             except socket.timeout:
-                if self._stop_event.is_set():
+                if stop.is_set():
                     break
                 log_event("Connection timed out", "warn")
             except OSError as e:
-                if self._stop_event.is_set():
+                if stop.is_set():
                     break
                 log_event(f"Connection error: {e}", "error")
             except Exception as e:
-                if self._stop_event.is_set():
+                if stop.is_set():
                     break
                 log_event(f"Unexpected error: {e}", "error")
             finally:
@@ -154,7 +158,7 @@ class ClientConnection:
                     self._sock = None
                 self._connected = False
 
-            if self._stop_event.is_set():
+            if stop.is_set():
                 break
 
             if not auto_reconnect:
@@ -169,7 +173,7 @@ class ClientConnection:
             self._callbacks.get("on_connecting", lambda: None)()
 
             deadline = time.monotonic() + max(1, int(delay))
-            while not self._stop_event.is_set():
+            while not stop.is_set():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -182,7 +186,7 @@ class ClientConnection:
         """Blocking receive loop.  Exits on disconnect / stop_event."""
         inbox = Inbox(RECEIVED_FILES_DIR)
         try:
-            for mtype, payload in iter_messages(conn, self._stop_event):
+            for mtype, payload in iter_messages(conn, stop):
                 try:
                     desc, fp = inbox.feed(mtype, payload)
                 except Exception as e:
