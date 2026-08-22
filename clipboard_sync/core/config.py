@@ -59,6 +59,7 @@ def config_defaults(mode: str) -> dict:
     return {
         "server_ip": "", "auto_reconnect": True,
         "last_connected_ip": "",
+        "reconnect_delay": 5,
         "close_action": "tray", "theme": "dark",
         "autostart": False,
     }

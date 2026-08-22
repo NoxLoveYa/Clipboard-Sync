@@ -194,7 +194,10 @@ class ClipboardSyncGUI:
             log_event("Please enter a server IP address", "warn")
             return
         self._watcher.start()
-        self._client.start(ip, auto_reconnect)
+        self._client.start(
+            ip, auto_reconnect,
+            reconnect_delay=int(self._config.get("reconnect_delay", 5)),
+        )
 
     def _stop_client(self) -> None:
         self._client.stop()
@@ -218,7 +221,10 @@ class ClipboardSyncGUI:
     # ── settings ──────────────────────────────────────────────────────────
 
     def _open_settings(self) -> None:
-        open_settings_dialog(self.root, self._config, self._apply_settings)
+        open_settings_dialog(
+            self.root, self._config, self._apply_settings,
+            show_reconnect=self._mode == "client",
+        )
 
     def _apply_settings(self, new_config: dict) -> None:
         changed_theme = new_config.get("theme") != self._config.get("theme")
@@ -229,6 +235,10 @@ class ClipboardSyncGUI:
         changed_autostart = (
             bool(new_config.get("autostart", False)) !=
             bool(self._config.get("autostart", False))
+        )
+        changed_delay = (
+            new_config.get("reconnect_delay") !=
+            self._config.get("reconnect_delay")
         )
 
         self._config = new_config
@@ -252,6 +262,11 @@ class ClipboardSyncGUI:
 
         if changed_autostart:
             self._apply_autostart()
+
+        if changed_delay:
+            delay = int(new_config.get("reconnect_delay", 5))
+            self._client.reconnect_delay = delay
+            log_event(f"Reconnect delay set to {delay}s", "success")
 
     # ── windows autostart ────────────────────────────────────────────────
 

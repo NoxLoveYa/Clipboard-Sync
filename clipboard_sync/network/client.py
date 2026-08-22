@@ -34,6 +34,7 @@ class ClientConnection:
         self._connected = False
         self._stop_event = threading.Event()
         self._last_sent = ""
+        self._reconnect_delay = RECONNECT_DELAY
 
     # -- public API -----------------------------------------------------------
 
@@ -49,8 +50,20 @@ class ClientConnection:
     def last_sent(self, value: str) -> None:
         self._last_sent = value
 
-    def start(self, server_ip: str, auto_reconnect: bool) -> None:
+    @property
+    def reconnect_delay(self) -> int:
+        """Seconds to wait between reconnect attempts (read each retry)."""
+        return self._reconnect_delay
+
+    @reconnect_delay.setter
+    def reconnect_delay(self, value: int) -> None:
+        self._reconnect_delay = max(1, int(value))
+
+    def start(self, server_ip: str, auto_reconnect: bool,
+              reconnect_delay: int | None = None) -> None:
         """Begin connecting.  Spawns the connect-loop thread."""
+        if reconnect_delay is not None:
+            self.reconnect_delay = reconnect_delay
         self._stop_event.clear()
         self._callbacks.get("on_connecting", lambda: None)()
         status_queue.put(("#ff9800", "Connecting…"))
@@ -161,15 +174,18 @@ class ClientConnection:
                 status_queue.put(("#f44336", "Disconnected"))
                 return
 
-            log_event(f"Retrying in {RECONNECT_DELAY}s…", "warn")
+            delay = self._reconnect_delay
+            log_event(f"Retrying in {delay}s…", "warn")
             status_queue.put(
-                ("#ff9800", f"Retrying in {RECONNECT_DELAY}s…"))
+                ("#ff9800", f"Retrying in {delay}s…"))
             self._callbacks.get("on_connecting", lambda: None)()
 
-            for _ in range(RECONNECT_DELAY * 2):
-                if self._stop_event.is_set():
-                    return
-                time.sleep(0.5)
+            deadline = time.monotonic() + max(1, int(delay))
+            while not self._stop_event.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.25, remaining))
 
         self._callbacks.get("on_disconnected", lambda: None)()
         status_queue.put(("#f44336", "Disconnected"))

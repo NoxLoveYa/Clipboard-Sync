@@ -28,6 +28,16 @@ THEME_MAP: dict[str, str] = {
     "Light": "light",
     "System": "system",
 }
+RECONNECT_DELAY_MAP: dict[str, int] = {
+    "1 second": 1,
+    "2 seconds": 2,
+    "3 seconds": 3,
+    "5 seconds": 5,
+    "10 seconds": 10,
+    "15 seconds": 15,
+    "30 seconds": 30,
+    "60 seconds": 60,
+}
 
 
 # ── windows autostart (HKCU Run key) ─────────────────────────────────────────
@@ -111,6 +121,7 @@ def open_settings_dialog(
     parent: ctk.CTk,
     current_config: dict,
     on_save: callable,
+    show_reconnect: bool = False,
 ) -> None:
     """Open a modal settings dialog.
 
@@ -122,8 +133,10 @@ def open_settings_dialog(
         Must contain at least ``close_action`` and ``theme`` keys.
     on_save : callable
         Called with the updated config dict when the user clicks Save.
+    show_reconnect : bool
+        Show the client-only reconnect-delay row.
     """
-    WIN_W, WIN_H = 360, 300
+    WIN_W, WIN_H = 360, 300 + (52 if show_reconnect else 0)
 
     dialog = ctk.CTkToplevel(parent)
     dialog.title("Settings")
@@ -160,6 +173,12 @@ def open_settings_dialog(
     theme_var = _option_row("Theme:", THEME_MAP,
                             "theme", top_pad=4, bottom_pad=10)
 
+    delay_var: ctk.StringVar | None = None
+    if show_reconnect:
+        delay_var = _option_row(
+            "Reconnect delay (unlimited retries):", RECONNECT_DELAY_MAP,
+            "reconnect_delay", top_pad=4, bottom_pad=10)
+
     autostart_var = ctk.BooleanVar(
         value=bool(current_config.get("autostart", False)))
     ctk.CTkCheckBox(
@@ -183,6 +202,8 @@ def open_settings_dialog(
         new_config["close_action"] = CLOSE_ACTION_MAP[close_var.get()]
         new_config["theme"] = THEME_MAP[theme_var.get()]
         new_config["autostart"] = bool(autostart_var.get())
+        if delay_var is not None:
+            new_config["reconnect_delay"] = RECONNECT_DELAY_MAP[delay_var.get()]
         on_save(new_config)
         dialog.destroy()
 
